@@ -1,0 +1,26 @@
+# data / checkpoints
+data/
+pretrained_models/
+work_dirs/
+*.pth
+*.pt
+*.ckpt
+
+# logs
+*.log
+tblog/
+wandb/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+
+# editors
+.vscode/
+.idea/
+.DS_Store

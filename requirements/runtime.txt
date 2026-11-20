@@ -1,0 +1,3 @@
+mmengine>=0.10.0
+numpy
+torch>=2.1.0

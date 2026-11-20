@@ -1,0 +1,22 @@
+[build-system]
+requires = ['setuptools>=61']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'otavsr'
+version = '0.1.0'
+description = 'Replication of OT-based semantic alignment for LLM-based audio-visual speech recognition'
+readme = 'README.md'
+requires-python = '>=3.8'
+dependencies = ['mmengine>=0.10.0', 'numpy', 'torch>=2.1.0']
+
+[project.optional-dependencies]
+test = ['pytest']
+
+[tool.setuptools.packages.find]
+include = ['otavsr*']
+exclude = ['tests*', 'docs*', 'configs*']
+
+[tool.pytest.ini_options]
+testpaths = ['tests']
+filterwarnings = ['ignore::DeprecationWarning']
