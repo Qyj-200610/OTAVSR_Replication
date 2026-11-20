@@ -1,6 +1,5 @@
 # Copyright (c) OTAVSR. All rights reserved.
 """Transcript tokenisation with the LLaMA tokenizer."""
-from typing import Optional
 
 import torch
 

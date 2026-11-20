@@ -53,15 +53,26 @@ class MaxFramesBatchSampler(Sampler):
             raise RuntimeError(
                 'MaxFramesBatchSampler needs a sampler exposing `data_source` '
                 '(mmengine DefaultSampler does).')
-        data_list = getattr(dataset, 'data_list', None)
-        if data_list is None:
-            data_list = [
-                dataset.get_data_info(index)
-                for index in range(len(dataset))
-            ]
-        self.frames = np.asarray(
-            [int(info[frames_key]) for info in data_list], dtype=np.int64)
+        self.frames = self._frame_counts(dataset, frames_key)
         self._length: Optional[int] = None
+
+    @staticmethod
+    def _frame_counts(dataset, frames_key: str) -> np.ndarray:
+        """Frame count of every sample.
+
+        ``BaseDataset`` empties ``data_list`` when ``serialize_data=True`` (the
+        default), so ``dataset.data_list`` is an **empty list** in that case --
+        reading it directly would give zero batches and a silently empty
+        epoch. ``get_data_info`` works for both serialised and plain datasets.
+        """
+        data_list = getattr(dataset, 'data_list', None)
+        if data_list:
+            return np.asarray(
+                [int(info[frames_key]) for info in data_list], dtype=np.int64)
+        return np.asarray(
+            [int(dataset.get_data_info(i)[frames_key])
+             for i in range(len(dataset))],
+            dtype=np.int64)
 
     def __iter__(self) -> Iterator[List[int]]:
         batch: List[int] = []

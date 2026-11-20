@@ -1,6 +1,5 @@
 # Copyright (c) OTAVSR. All rights reserved.
 """Element-wise addition, ``h = z_a + z_v`` (paper Eq.(12))."""
-import torch
 from mmengine.model import BaseModule
 
 from otavsr.registry import MODELS

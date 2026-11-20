@@ -43,7 +43,7 @@ OTAVSR_Replication/
 │   ├── misc/print_config.py       # 展开 _base_，检查覆盖是否符合预期
 │   └── analysis_tools/
 │       └── check_ot_numerics.py   # 论文式(7) 符号 / bucket 边缘 / mask 的数值验证
-├── tests/                         # 84 个用例，纯 CPU，无需数据
+├── tests/                         # 176 个用例，纯 CPU，无需数据
 ├── docs/zh_cn/
 │   ├── replication_guide.md       # 复现指南（原 v2 文档）
 │   ├── project_structure.md       # 本文件
@@ -126,7 +126,7 @@ model = dict(fusion=dict(type='MyFusion'))
 ## 5. 五分钟自检（改完任何东西都跑一遍）
 
 ```bash
-python -m pytest tests -q                       # 84 用例，纯 CPU
+python -m pytest tests -q                       # 176 用例，纯 CPU
 python tools/misc/print_config.py configs/table5_sota/setting3.py --keys model.ot_loss
 python tools/analysis_tools/check_ot_numerics.py
 ```

@@ -15,10 +15,15 @@ class PackAVSRInputs:
     ``num_frames`` is the number of 25 Hz frames of the fused sequence: the
     acoustic stream is downsampled by 2 before fusion, so its valid length must
     be exactly ``2 * num_frames`` before the conv layer.
+
+    Note: only *string* metadata goes through ``meta_keys``. ``num_frames`` and
+    ``num_tokens`` are typed tensors on :class:`AVSRDataSample` and are set
+    explicitly -- passing a python int through ``set_field`` would hit the
+    ``dtype=torch.Tensor`` assertion.
     """
 
     def __init__(self,
-                 meta_keys=('sample_id', 'gt_text', 'num_frames'),
+                 meta_keys=('sample_id', 'gt_text'),
                  to_float32: bool = True) -> None:
         self.meta_keys = meta_keys
         self.to_float32 = to_float32
@@ -46,7 +51,7 @@ class PackAVSRInputs:
             audio = audio.float()
             video = video.float()
         inputs = dict(audio=audio, video=video)
-        if 'audio_lengths' in results:
+        if results.get('audio_lengths') is not None:
             inputs['audio_lengths'] = results['audio_lengths']
         return dict(inputs=inputs, data_samples=sample)
 

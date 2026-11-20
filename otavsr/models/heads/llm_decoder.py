@@ -3,7 +3,6 @@
 from typing import Dict, List, Optional, Tuple
 
 import torch
-import torch.nn as nn
 from mmengine.model import BaseModule
 
 from otavsr.registry import MODELS
@@ -166,22 +165,42 @@ class LLMDecoder(BaseModule):
         return self.llm.model.embed_tokens(token_ids)
 
     def prompt_embeds(self, device=None) -> torch.Tensor:
-        """Instruction embeddings with the leading/trailing specials removed.
+        """Instruction embeddings without the surrounding special tokens.
 
-        ``input_ids[:, 1:-1]`` is what Llama-AVSR does, so the prompt does not
-        inject a second BOS/EOS pair.
+        Llama-AVSR hard-codes ``input_ids[:, 1:-1]``, which assumes the
+        tokenizer appends an EOS. The LLaMA-3 tokenizer does **not**
+        (``add_eos_token=False``), so that slice silently drops the last real
+        token of the prompt. Here the BOS/EOS are stripped only if they are
+        actually present, which is tokenizer-agnostic.
         """
         ids = self.tokenizer(self.prompt, return_tensors='pt').input_ids
-        ids = ids[:, 1:-1]
+        specials = set(self.tokenizer.all_special_ids)
+        first, last = ids[0, 0].item(), ids[0, -1].item()
+        start = 1 if first in specials else 0
+        end = -1 if (last in specials and ids.shape[1] > 1) else ids.shape[1]
+        ids = ids[:, start:end]
         if device is not None:
             ids = ids.to(device)
         return self.embed_tokens(ids)
 
+    @property
+    def dtype(self) -> torch.dtype:
+        """dtype of the LLM weights (bfloat16 when loaded as such)."""
+        try:
+            return next(self.llm.parameters()).dtype
+        except StopIteration:  # pragma: no cover - defensive
+            return torch.float32
+
     def forward(self, av_embeds: torch.Tensor,
                 target_ids: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """Teacher-forced cross entropy (``L_AR`` of Eq.(14))."""
+        """Teacher-forced cross entropy (``L_AR`` of Eq.(14)).
+
+        ``av_embeds`` come from fp32 projectors, while the LLM may be bf16;
+        casting here avoids "expected scalar type BFloat16 but found Float"
+        during inference, when no autocast is active.
+        """
         embeds, labels = assemble_avsr_inputs(
-            av_embeds,
+            av_embeds.to(self.dtype),
             self.prompt_embeds(av_embeds.device),
             target_ids,
             self.embed_tokens,
@@ -192,7 +211,7 @@ class LLMDecoder(BaseModule):
         return {'loss_ar': out.loss}
 
     @torch.no_grad()
-    def generate(self, av_embeds: torch.Tensor) -> List[torch.Tensor]:
+    def generate(self, av_embeds: torch.Tensor) -> List[str]:
         """Greedy/beam decoding from ``[prompt][av][BOS]`` only."""
         batch = av_embeds.shape[0]
         prompt = self.prompt_embeds(av_embeds.device)
@@ -203,7 +222,8 @@ class LLMDecoder(BaseModule):
                        self.bos_token_id,
                        dtype=torch.long,
                        device=av_embeds.device))
-        prefix = torch.cat([prompt, av_embeds, bos], dim=1)
+        prefix = torch.cat(
+            [prompt, av_embeds.to(self.dtype), bos], dim=1)
         generated = self.llm.generate(
             inputs_embeds=prefix,
             max_new_tokens=self.max_dec_tokens,

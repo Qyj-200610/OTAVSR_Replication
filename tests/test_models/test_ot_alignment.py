@@ -1,6 +1,5 @@
 # Copyright (c) OTAVSR. All rights reserved.
 """Unit tests of the OT alignment conventions (guide §3.2 - §3.4)."""
-import pytest
 import torch
 
 from otavsr.models.losses import OTAlignmentLoss

@@ -716,7 +716,7 @@ OTAVSR_Replication/
 │   ├── evaluation/metrics/wer.py       # 小写去标点 + 编辑距离
 │   └── engine/hooks/ot_monitor.py      # §3.3.1 的诊断量
 ├── tools/{train.py,test.py,misc/print_config.py,analysis_tools/check_ot_numerics.py}
-├── tests/                       # 84 用例，纯 CPU
+├── tests/                       # 176 用例，纯 CPU
 └── docs/zh_cn/{replication_guide.md,project_structure.md,evidence/}
 ```
 

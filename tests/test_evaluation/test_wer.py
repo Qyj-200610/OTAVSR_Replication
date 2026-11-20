@@ -1,6 +1,5 @@
 # Copyright (c) OTAVSR. All rights reserved.
 """Tests of the WER metric and its text normalisation."""
-import torch
 
 from otavsr.evaluation.metrics import (WordErrorRate, compute_wer, levenshtein,
                                        normalize_text)

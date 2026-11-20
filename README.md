@@ -13,8 +13,8 @@
 | **是什么** | 一个可运行、可测试的 OT 对齐模块（论文唯一的新东西）+ 完整的主干接线（Whisper / AV-HuBERT / LLaMA-3.2-3B + LoRA） |
 | **不是什么** | 不是"已经复现出论文数字"的仓库 —— 端到端训练需要 LRS3 433 h + 8 卡，本机（Windows/CPU）只验证了纯 PyTorch 部分 |
 | **工程骨架** | 对齐 [mmpretrain](https://github.com/open-mmlab/mmpretrain)：`configs/` 用 `_base_` 继承、`otavsr/` 用 registry 注册、`tools/` 入口、`tests/` pytest |
-| **当前状态** | `pytest tests -q` → **85 passed**（纯 CPU，5 秒）；28 个 config 全部可加载；13 个组件注册到 `MODELS` |
-| **代码量** | 48 个 Python 文件，约 625 KB（不含数据/权重） |
+| **当前状态** | `pytest tests -q` → **171 passed / 5 skipped**（纯 CPU，15 秒）；28 个 config 全部可加载、可 `MODELS.build`；13 个组件注册到 `MODELS` |
+| **代码量** | 48 个 Python 文件，约 630 KB（不含数据/权重） |
 
 ---
 
@@ -26,6 +26,7 @@
 | 看懂代码结构、想加一个融合/损失 | [docs/zh_cn/project_structure.md](docs/zh_cn/project_structure.md) | 10 min |
 | 核对论文数字、判断"复现到什么程度算成功" | [docs/zh_cn/evidence/paper_wer_logs.md](docs/zh_cn/evidence/paper_wer_logs.md) | 10 min |
 | 对照官方仓库的某个实现细节 | [docs/zh_cn/evidence/upstream_sources.md](docs/zh_cn/evidence/upstream_sources.md) | 5 min |
+| 看这轮 debug 修了什么（8 个缺陷） | [docs/zh_cn/evidence/debug_log.md](docs/zh_cn/evidence/debug_log.md) | 5 min |
 
 指南里的每个 `✅/⚠️/🆕` 标记都对应一条证据；**先读指南的 §0（15 行修订摘要）和 §4.3（方差分析）**，其余按需。
 
@@ -36,7 +37,7 @@
 ```bash
 pip install -r requirements/runtime.txt -r requirements/mptest.txt
 
-python -m pytest tests -q                      # 85 passed
+python -m pytest tests -q                      # 171 passed, 5 skipped
 python tools/analysis_tools/check_ot_numerics.py   # 验证论文式(7) 的符号、bucket、mask
 python tools/misc/print_config.py configs/table5_sota/setting3.py --keys model.ot_loss
 ```
@@ -67,7 +68,7 @@ OTAVSR_Replication/
 │   ├── evaluation/metrics/wer.py     # WER（自带编辑距离）
 │   └── engine/hooks/ot_monitor.py    # OT 诊断量的监控
 ├── tools/                    # train.py / test.py / print_config.py / check_ot_numerics.py
-├── tests/                    # 85 用例，5 个文件
+├── tests/                    # 176 用例，10 个文件
 ├── docs/zh_cn/               # 4 份文档（见上表）
 └── resources/                # 论文原图
 ```
@@ -151,7 +152,7 @@ python tools/test.py configs/eval_lrs3_433h_snr.py \
 `pip install mmengine`（本项目只依赖 mmengine，不依赖 mmcv / mmpretrain）。
 
 **Q: 没有 GPU / 没有权重，能跑什么？**
-`pytest tests`（85 用例）、`check_ot_numerics.py`、`print_config.py` 全都不需要 GPU 和权重。主干背板用 mock 验证过 wiring。
+`pytest tests`（176 用例）、`check_ot_numerics.py`、`print_config.py` 全都不需要 GPU 和权重。主干背板用 mock 验证过 wiring。
 
 **Q: `s_tilde` 该设多少？**
 不是固定的 0.5。先看 `OTMonitorHook` 打出的 `row_max_cos`；若它明显低于 s̃（说明在丢有用的帧），把 s̃ 设成 `row_max_cos` 的 10–20 分位数。训练初期 `row_max_cos` 只有 0.2–0.3，此时 s̃=0.5 等于随机丢帧。

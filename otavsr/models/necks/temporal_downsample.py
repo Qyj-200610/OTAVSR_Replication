@@ -1,6 +1,5 @@
 # Copyright (c) OTAVSR. All rights reserved.
 """Temporal downsampling of the acoustic stream (50 Hz -> 25 Hz)."""
-from typing import Optional
 
 import torch.nn as nn
 from mmengine.model import BaseModule

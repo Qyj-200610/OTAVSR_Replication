@@ -1,5 +1,7 @@
 # Copyright (c) OTAVSR. All rights reserved.
 """Default runtime settings (logging, checkpoints, distributed)."""
+import platform
+
 default_scope = 'otavsr'
 
 default_hooks = dict(
@@ -8,9 +10,14 @@ default_hooks = dict(
     param_scheduler=dict(type='ParamSchedulerHook'),
     checkpoint=dict(
         type='CheckpointHook',
-        interval=1,
+        # 30k iters: saving every iteration would write 30k files. The paper
+        # evaluates the 30k checkpoint and the val interval is 3k, so 3k.
+        interval=3000,
         by_epoch=False,
-        save_best='auto',
+        save_best='wer',
+        # WER must be MINIMISED; mmengine's default rule is 'greater', which
+        # would keep the worst checkpoint.
+        rule='less',
         max_keep_ckpts=3),
     sampler_seed=dict(type='DistSamplerSeedHook'),
     ot_monitor=dict(
@@ -20,9 +27,12 @@ default_hooks = dict(
     ),
 )
 
+#: 'fork' does not exist on Windows; the dataloader workers would crash there.
+_MP_START_METHOD = 'spawn' if platform.system() == 'Windows' else 'fork'
+
 env_cfg = dict(
     cudnn_benchmark=False,
-    mp_cfg=dict(mp_start_method='fork', opencv_num_threads=0),
+    mp_cfg=dict(mp_start_method=_MP_START_METHOD, opencv_num_threads=0),
     dist_cfg=dict(backend='nccl'),
 )
 

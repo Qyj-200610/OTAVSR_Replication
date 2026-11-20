@@ -1,6 +1,5 @@
 # Copyright (c) OTAVSR. All rights reserved.
 """WER metric, implemented without third-party edit-distance packages."""
-import re
 import string
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -51,9 +50,12 @@ class WordErrorRate(BaseMetric):
 
     Args:
         collect_device (str): ``'cpu'`` or ``'gpu'``.
-        prefix (str, optional): metric name prefix.
+        prefix (str): metric name prefix. Empty by default so the key is plain
+            ``wer`` (``None`` triggers mmengine's "prefix is not set" warning).
         strip_punctuation (bool): apply :func:`normalize_text`.
     """
+
+    default_prefix = ''
 
     def __init__(self,
                  collect_device: str = 'cpu',
@@ -68,6 +70,12 @@ class WordErrorRate(BaseMetric):
     def process(self, data_batch: Any, data_samples: Sequence[dict]) -> None:
         """Collect ``pred_text`` / ``gt_text`` of every sample."""
         for sample in data_samples:
+            if not hasattr(sample, 'get'):
+                raise TypeError(
+                    'WordErrorRate expects mapping-like predictions with '
+                    "'pred_text'/'gt_text', got "
+                    f'{type(sample).__name__}. A model whose `predict` returns '
+                    'bare strings will silently break evaluation.')
             prediction = sample.get('pred_text', '')
             reference = sample.get('gt_text', '')
             self.results.append((reference, prediction))

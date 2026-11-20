@@ -10,11 +10,15 @@ Composition (paper Fig.1a)::
                                                 z_t = FC(Embed(target)) --OT--> L_align
 
 The OT branch is a *training-only* side path: it never touches ``h_av``.
+
+Length contract: ``inputs['audio_lengths']`` is expressed in **seconds**
+everywhere in the project. Each backbone converts it to its own frame rate
+(Whisper 50 Hz, AV-HuBERT 25 Hz); the downsampling conv halves the *frame*
+count, not the duration, so the same seconds value is forwarded to both.
 """
 from typing import Dict, List, Optional, Sequence
 
 import torch
-from mmengine.model import BaseModule
 
 from otavsr.registry import MODELS
 
@@ -40,6 +44,8 @@ class AVSRLLMClassifier(BaseClassifier):
         ot_loss (dict, optional): :class:`~otavsr.models.losses.OTAlignmentLoss`
             config. ``None`` reproduces the paper's "no align" baseline.
         modality (str): ``'audiovisual'`` or ``'audio'``.
+        data_preprocessor (dict, optional): batch padding, see
+            :class:`~otavsr.models.data_preprocessors.AVSRDataPreprocessor`.
     """
 
     def __init__(self,
@@ -52,8 +58,10 @@ class AVSRLLMClassifier(BaseClassifier):
                  fusion: Optional[dict] = None,
                  ot_loss: Optional[dict] = None,
                  modality: str = 'audiovisual',
+                 data_preprocessor: Optional[dict] = None,
                  init_cfg=None) -> None:
-        super().__init__(init_cfg=init_cfg)
+        super().__init__(
+            data_preprocessor=data_preprocessor, init_cfg=init_cfg)
         if modality not in ('audiovisual', 'audio'):
             raise ValueError(f"unsupported modality {modality!r}")
         self.modality = modality
@@ -75,21 +83,21 @@ class AVSRLLMClassifier(BaseClassifier):
             raise ValueError('`fusion` is required for audiovisual training.')
 
     # ------------------------------------------------------------------ #
-    def _masks(self, data_samples: Sequence, num_frames: int,
-               num_tokens: int):
+    def _masks(self, data_samples: Sequence, num_frames: int, num_tokens: int,
+               device: torch.device):
         """Boolean masks for the 25 Hz fused sequence and the target tokens.
 
         The two masks have different lengths (``num_frames`` vs ``num_tokens``),
         so they need their own index ranges -- mixing them up silently shifts
-        the OT reference tokens.
+        the OT reference tokens. ``data_samples`` tensors come from the
+        dataloader (CPU), so the masks are built on ``device`` explicitly.
         """
-        device = next(self.parameters()).device
         frames = torch.stack([sample.num_frames for sample in data_samples])
         tokens = torch.stack([sample.num_tokens for sample in data_samples])
         frame_steps = torch.arange(num_frames, device=device)
         token_steps = torch.arange(num_tokens, device=device)
-        return (frame_steps.unsqueeze(0) < frames.unsqueeze(1),
-                token_steps.unsqueeze(0) < tokens.unsqueeze(1))
+        return (frame_steps.unsqueeze(0) < frames.to(device).unsqueeze(1),
+                token_steps.unsqueeze(0) < tokens.to(device).unsqueeze(1))
 
     def extract_feat(self, inputs, data_samples=None) -> Dict[str, torch.Tensor]:
         """Encode both modalities and the text reference ``z_t``.
@@ -97,12 +105,10 @@ class AVSRLLMClassifier(BaseClassifier):
         Returns a dict with ``z_a``, ``z_v`` (``None`` in audio-only mode),
         ``z_t``, ``h_av`` and the two masks.
         """
-        lengths = inputs.get('audio_lengths')
+        lengths = inputs.get('audio_lengths')  # seconds, see module docstring
         hidden_a = self.audio_backbone(inputs['audio'], lengths=lengths)
         if self.audio_downsample is not None:
             hidden_a = self.audio_downsample(hidden_a)
-            if lengths is not None:
-                lengths = torch.ceil(lengths / 2.0).long()
         z_a = (self.audio_projector(hidden_a)
                if self.audio_projector is not None else hidden_a)
 
@@ -112,12 +118,23 @@ class AVSRLLMClassifier(BaseClassifier):
             z_v = (self.video_projector(hidden_v)
                    if self.video_projector is not None else hidden_v)
 
+        # The two streams must have the same length before they are fused.
+        # They normally agree (2 x 50 Hz acoustic / 2 = 25 Hz = video rate), but
+        # the mel front-end adds one frame (T_mel = 1 + T/hop), which makes the
+        # acoustic branch one frame longer for some durations. Cropping to the
+        # shorter one is safer than a silent off-by-one in the OT alignment.
+        if z_v is not None:
+            num_steps = min(z_a.shape[1], z_v.shape[1])
+            z_a = z_a[:, :num_steps]
+            z_v = z_v[:, :num_steps]
+
+        device = z_a.device
         target_ids = torch.stack(
-            [sample.target_ids for sample in data_samples])
+            [sample.target_ids for sample in data_samples]).to(device)
         z_t = self.head.embed_tokens(target_ids).float()
 
         src_mask, tgt_mask = self._masks(data_samples, z_a.shape[1],
-                                         z_t.shape[1])
+                                         z_t.shape[1], device)
         if z_v is None:
             h_av = z_a
         else:
@@ -132,8 +149,9 @@ class AVSRLLMClassifier(BaseClassifier):
 
     def loss(self, inputs, data_samples=None) -> Dict[str, torch.Tensor]:
         feats = self.extract_feat(inputs, data_samples)
+        device = feats['h_av'].device
         target_ids = torch.stack(
-            [sample.target_ids for sample in data_samples])
+            [sample.target_ids for sample in data_samples]).to(device)
         losses = self.head(feats['h_av'], target_ids)
         if self.ot_loss is not None:
             loss_a, stats_a = self.ot_loss.align_loss(
@@ -154,6 +172,17 @@ class AVSRLLMClassifier(BaseClassifier):
             losses.update({f'ot_{key}': value for key, value in stats.items()})
         return losses
 
-    def predict(self, inputs, data_samples=None) -> List[str]:
+    def predict(self, inputs, data_samples=None) -> List[dict]:
+        """Decode and return ``mmengine``-style prediction dicts."""
         feats = self.extract_feat(inputs, data_samples)
-        return self.head.generate(feats['h_av'])
+        texts = self.head.generate(feats['h_av'])
+        predictions = []
+        for index, text in enumerate(texts):
+            sample = data_samples[index] if data_samples is not None else None
+            predictions.append(
+                dict(
+                    pred_text=text,
+                    gt_text=getattr(sample, 'gt_text', '') or '',
+                    sample_id=getattr(sample, 'sample_id', '') or '',
+                ))
+        return predictions

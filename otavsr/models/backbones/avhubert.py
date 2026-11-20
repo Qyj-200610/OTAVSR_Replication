@@ -85,18 +85,21 @@ class AVHuBERTEncoder(BaseModule):
                 padding_mask: Optional[torch.Tensor] = None,
                 lengths: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Args:
-            video (Tensor): ``[B, T, 1, 88, 88]`` mouth crops (88 is the crop
-                size the two official baselines use for AV-HuBERT).
+            video (Tensor): ``[B, T, C, H, W]`` mouth crops (``C=1``, 88x88 --
+                the crop size the two official baselines use for AV-HuBERT).
             padding_mask (Tensor, optional): ``[B, T]``, ``True`` = padded.
-            lengths (Tensor, optional): number of valid frames, ``[B]``;
-                converted to ``padding_mask`` when given.
+            lengths (Tensor, optional): valid duration in **seconds**, ``[B]``
+                (the project-wide contract). It is converted to a frame count
+                with the encoder's 25 Hz rate here; do not pass frame counts.
 
         Returns:
             Tensor: ``[B, T', 1024]`` features at 25 Hz.
         """
         if padding_mask is None and lengths is not None:
+            num_frames = torch.ceil(
+                lengths.to(video.device) * self.frame_rate).long()
             steps = torch.arange(video.shape[1], device=video.device)
-            padding_mask = steps.unsqueeze(0) >= lengths.unsqueeze(1)
+            padding_mask = steps.unsqueeze(0) >= num_frames.unsqueeze(1)
         source = {'video': video, 'audio': None}
         features = self.encoder.extract_features(
             source=source, padding_mask=padding_mask, mask=False)

@@ -10,7 +10,6 @@ deterministically from the input length, which is enough to reproduce the
 *shape* of the ablation (and is what you should report if you compare with the
 paper's Q_former row).
 """
-import math
 from typing import Optional
 
 import torch

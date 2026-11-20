@@ -14,10 +14,17 @@ class BaseClassifier(BaseModel, metaclass=ABCMeta):
 
     The three modes follow mmpretrain: ``tensor`` returns the fused features,
     ``loss`` returns a dict of losses and ``predict`` returns predictions.
+
+    Args:
+        data_preprocessor (dict | nn.Module, optional): forwarded to
+            ``BaseModel``. The configs pass ``dict(type='AVSRDataPreprocessor')``;
+            without this argument ``MODELS.build(cfg.model)`` fails with
+            "unexpected keyword argument 'data_preprocessor'".
     """
 
-    def __init__(self, init_cfg=None) -> None:
-        super().__init__(init_cfg=init_cfg)
+    def __init__(self, data_preprocessor=None, init_cfg=None) -> None:
+        super().__init__(
+            data_preprocessor=data_preprocessor, init_cfg=init_cfg)
         #: filled by :meth:`parse_losses`, read by ``OTMonitorHook``
         self._ot_stats: Dict[str, float] = {}
 
@@ -40,7 +47,13 @@ class BaseClassifier(BaseModel, metaclass=ABCMeta):
     def loss(self, inputs, data_samples=None) -> Dict[str, torch.Tensor]:
         raise NotImplementedError
 
-    def predict(self, inputs, data_samples=None) -> List:
+    def predict(self, inputs, data_samples=None) -> List[dict]:
+        """Return a list of dicts.
+
+        ``mmengine`` metrics are mapping-based: ``WordErrorRate.process`` reads
+        ``sample['pred_text']`` / ``sample['gt_text']``, so a bare list of
+        strings would raise ``'str' object has no attribute 'get'``.
+        """
         raise NotImplementedError
 
     def parse_losses(self, losses: Dict[str, torch.Tensor]):

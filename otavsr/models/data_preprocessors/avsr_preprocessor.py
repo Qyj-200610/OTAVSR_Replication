@@ -5,6 +5,7 @@ from typing import Dict, Optional
 import torch
 import torch.nn.functional as F
 from mmengine.model import BaseDataPreprocessor
+from mmengine.registry import MODELS as MMENGINE_MODELS
 
 from otavsr.registry import MODELS
 
@@ -40,6 +41,11 @@ class AVSRDataPreprocessor(BaseDataPreprocessor):
     ``mmengine`` collates dicts with ``pseudo_collate``, so every field arrives
     as a *list* of tensors of different length. LRS3 clips range from a few
     frames to 400 (16 s at 25 fps), which makes this padding mandatory.
+
+    Registered in **both** registries: ``mmengine.model.BaseModel.__init__``
+    builds ``data_preprocessor`` with ``mmengine.registry.MODELS`` (its own
+    registry, not ours), so registering only in ``otavsr.MODELS`` fails with
+    "AVSRDataPreprocessor is not in the mmengine::model registry".
 
     Args:
         pad_value (float): value used for the audio / video padding.
@@ -86,3 +92,8 @@ class AVSRDataPreprocessor(BaseDataPreprocessor):
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}(pad_value={self.pad_value})'
+
+
+# ``mmengine.model.BaseModel`` resolves ``data_preprocessor`` through its own
+# MODELS registry, so the class has to exist there as well.
+MMENGINE_MODELS.register_module(module=AVSRDataPreprocessor)

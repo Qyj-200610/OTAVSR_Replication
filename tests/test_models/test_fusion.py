@@ -129,7 +129,7 @@ class TestClassifierWiring:
     def test_loss_dict_and_parse(self):
         samples = _samples()
         inputs = dict(
-            audio=torch.randn(2, 80, 120), video=torch.randn(2, 40, 88, 88, 1))
+            audio=torch.randn(2, 80, 120), video=torch.randn(2, 40, 1, 88, 88))
         losses = self.model.loss(inputs, samples)
         assert 'loss_ar' in losses
         assert 'loss_align' in losses
@@ -139,6 +139,18 @@ class TestClassifierWiring:
         assert {'loss', 'loss_ar', 'loss_align'} <= set(log_vars)
         assert self.model._ot_stats  # diagnostics stashed for the hook
         total.backward()
+
+    def test_streams_of_different_length_are_cropped(self):
+        """The mel front-end can leave the acoustic branch one frame longer;
+        fusing without cropping raises a cat/attention shape error."""
+        samples = _samples(num_frames=40)
+        # audio: 802 frames -> downsample -> 401; video: 400 frames
+        inputs = dict(
+            audio=torch.randn(2, 802, 8), video=torch.randn(2, 40, 1, 88, 88))
+        feats = self.model.extract_feat(inputs, samples)
+        assert feats['z_a'].shape[1] == feats['z_v'].shape[1] == 40
+        losses = self.model.loss(inputs, samples)
+        assert torch.isfinite(losses['loss_ar'])
 
     def test_audio_only_skips_fusion(self):
         model = AVSRLLMClassifier(
@@ -153,9 +165,27 @@ class TestClassifierWiring:
             head=dict(type='_MockHead'),
             ot_loss=None)
         samples = _samples()
-        inputs = dict(audio=torch.randn(2, 80, 120), video=torch.zeros(2, 40, 88, 88, 1))
+        inputs = dict(
+            audio=torch.randn(2, 80, 120), video=torch.zeros(2, 40, 1, 88, 88))
         losses = model.loss(inputs, samples)
         assert set(losses) == {'loss_ar'}
+
+    def test_predict_returns_metric_ready_dicts(self):
+        """``WordErrorRate.process`` reads ``sample['pred_text']``; a bare list
+        of strings raises ``'str' object has no attribute 'get'``."""
+        from otavsr.evaluation.metrics import WordErrorRate
+        samples = _samples()
+        inputs = dict(
+            audio=torch.randn(2, 80, 120), video=torch.randn(2, 40, 1, 88, 88))
+        predictions = self.model.predict(inputs, samples)
+
+        assert isinstance(predictions, list) and len(predictions) == 2
+        assert set(predictions[0]) >= {'pred_text', 'gt_text'}
+        assert predictions[0]['gt_text'] == 'hello world'
+
+        metric = WordErrorRate()
+        metric.process(None, predictions)
+        assert metric.compute_metrics(metric.results)['wer'] >= 0.0
 
     def test_requires_fusion_for_audiovisual(self):
         try:

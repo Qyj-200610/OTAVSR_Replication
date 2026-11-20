@@ -15,14 +15,11 @@ garbage transcripts.
 import os.path as osp
 from typing import List, Tuple
 
+from mmengine.dataset import BaseDataset
 from mmengine.fileio import list_from_file
 from mmengine.logging import MMLogger
-from mmengine.registry import DefaultScope
 
 from otavsr.registry import DATASETS
-from otavsr.registry import TRANSFORMS
-
-from mmengine.dataset import BaseDataset
 
 __all__ = ['LRS3Dataset']
 
@@ -37,12 +34,17 @@ class LRS3Dataset(BaseDataset):
         video_subdir (str): subdirectory of the 96x96 mouth crops.
         audio_subdir (str): subdirectory of the 16 kHz wavs.
         pipeline (list): data pipeline.
-        modality (str): ``'audiovisual'`` / ``'audio'``; recorded in metainfo.
+        modality (str): ``'audiovisual'`` / ``'audio'``; stored per sample.
         test_mode (bool): disable training-time augmentation.
         serialize_data (bool): serialise the data list (mmpretrain default).
+            Note that with this on, ``dataset.data_list`` is emptied -- use
+            ``dataset.get_data_info(i)`` (the frame sampler does).
     """
 
-    METAINFO = dict(dataset='LRS3-TED', paper='arXiv:2607.09001')
+    #: Paper: arXiv:2607.09001 -- deliberately empty: mmengine treats any
+    #: string value in ``METAINFO`` as a path to a meta-info file and warns
+    #: "not a meta file, simply parsed as meta information" for each of them.
+    METAINFO = dict()
 
     def __init__(self,
                  data_root: str,

@@ -5,11 +5,14 @@ The paper follows MMS-LLaMA: 75 % of the training clips get babble noise at an
 SNR drawn uniformly from ``{-5, 0, 5, 10, 15, 20}`` dB, and the test set is
 evaluated at a *fixed* SNR.
 
-Two details that are easy to get wrong and that this class makes explicit:
+Three details that are easy to get wrong and that this class makes explicit:
 
 * the noise segment is a **random crop** of the noise file, so evaluating the
   same model twice gives different WER. Pass ``seed`` for a reproducible
   evaluation, or pre-generate the noisy wavs once.
+* with ``num_workers > 1`` every worker inherits the same seeded RNG, so all
+  workers would draw the *same* noise segments. The seed is therefore mixed
+  with ``torch.initial_seed()`` (which differs per worker) on first use.
 * Llama-AVSR instead puts ``999999`` in the SNR list, which gives 1/7 clean
   clips (86 %, not 75 %). Use ``prob`` if you want the paper's setting.
 """
@@ -63,10 +66,24 @@ class AddBabbleNoise:
         self.snr_levels = tuple(snr_levels)
         self.eval_snr = eval_snr
         self.sample_rate = sample_rate
+        self.seed = seed
         self._noise = None
-        self._rng = random.Random(seed) if seed is not None else random
-        self._torch_rng = (torch.Generator().manual_seed(seed)
-                           if seed is not None else None)
+        self._rng = None
+
+    # ------------------------------------------------------------------ #
+    def _get_rng(self) -> random.Random:
+        """Seeded RNG, unique per dataloader worker.
+
+        ``torch.initial_seed()`` is ``base_seed + worker_id`` inside a worker
+        and the base seed in the main process, so mixing it in keeps the run
+        reproducible while giving each worker a different noise sequence.
+        """
+        if self._rng is None:
+            seed = self.seed
+            if seed is not None:
+                seed = (int(seed) + torch.initial_seed()) % (2**31 - 1)
+            self._rng = random.Random(seed)
+        return self._rng
 
     @property
     def noise(self) -> torch.Tensor:
@@ -86,19 +103,20 @@ class AddBabbleNoise:
         if noise.numel() < num_samples:  # tile short noise files
             repeats = int(num_samples / noise.numel()) + 1
             noise = noise.repeat(repeats)
-        start = self._rng.randint(0, noise.numel() - num_samples)
+        start = self._get_rng().randint(0, noise.numel() - num_samples)
         return noise[start:start + num_samples]
 
     def transform(self, results: dict) -> dict:
         speech = results['audio']
         if speech.dim() > 1:
             speech = speech.squeeze(0)
+        rng = self._get_rng()
         if self.eval_snr is not None:
             snr = float(self.eval_snr)
         else:
-            if self._rng.random() >= self.prob:
+            if rng.random() >= self.prob:
                 return results
-            snr = float(self._rng.choice(self.snr_levels))
+            snr = float(rng.choice(self.snr_levels))
         segment = self._sample_segment(speech.numel())
         results['audio'] = mix_at_snr(speech, segment.to(speech.device), snr)
         results['snr_db'] = snr

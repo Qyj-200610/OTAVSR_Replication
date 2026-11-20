@@ -64,13 +64,6 @@ def log_sinkhorn(log_kernel: torch.Tensor,
     return log_u.unsqueeze(1) + log_kernel + log_v.unsqueeze(0)
 
 
-def _margin_logits(mask: torch.Tensor) -> torch.Tensor:
-    """Uniform log marginals that put all the mass on the valid entries."""
-    weight = mask.to(torch.float32)
-    weight = weight / weight.sum().clamp_min(1.0)
-    return torch.where(mask, weight, weight.new_full((), EPS)).log()
-
-
 def solve_ot(z_src: torch.Tensor,
              z_tgt: torch.Tensor,
              src_mask: torch.Tensor = None,

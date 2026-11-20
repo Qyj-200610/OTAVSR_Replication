@@ -19,7 +19,6 @@ _sys.path.insert(0, _root)
 from the base config.
 """
 import argparse
-import os.path as osp
 
 from mmengine.config import Config
 

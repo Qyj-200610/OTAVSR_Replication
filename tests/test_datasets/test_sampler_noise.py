@@ -14,6 +14,24 @@ class _FakeDataset:
     def __len__(self):
         return len(self.data_list)
 
+    def get_data_info(self, index):
+        return self.data_list[index]
+
+
+class _SerializedFakeDataset:
+    """Mimics ``BaseDataset(serialize_data=True)``: ``data_list`` is emptied
+    and the samples are only reachable through ``get_data_info``."""
+
+    def __init__(self, frames):
+        self._frames = list(frames)
+        self.data_list = []
+
+    def __len__(self):
+        return len(self._frames)
+
+    def get_data_info(self, index):
+        return dict(num_frames=self._frames[index])
+
 
 class _FakeSampler:
 
@@ -50,6 +68,17 @@ class TestMaxFramesBatchSampler:
     def test_registered_for_build_dataloader(self):
         from mmengine.registry import DATA_SAMPLERS
         assert 'MaxFramesBatchSampler' in DATA_SAMPLERS.module_dict
+
+    def test_works_on_a_serialized_dataset(self):
+        """``serialize_data=True`` empties ``data_list``; reading it directly
+        used to yield zero batches (a silently empty epoch)."""
+        frames = [400, 200, 100]
+        dataset = _SerializedFakeDataset(frames)
+        batch_sampler = MaxFramesBatchSampler(
+            _FakeSampler(dataset), max_frames=600)
+        batches = list(batch_sampler)
+        assert sum(len(batch) for batch in batches) == 3
+        assert len(batch_sampler) == len(batches)
 
     def test_length_is_consistent(self):
         dataset = _FakeDataset([400, 200, 100])

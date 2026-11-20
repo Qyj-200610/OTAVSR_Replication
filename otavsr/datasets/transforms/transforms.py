@@ -1,5 +1,10 @@
 # Copyright (c) OTAVSR. All rights reserved.
-"""Visual augmentation and log-mel extraction."""
+"""Visual augmentation and log-mel extraction.
+
+All video tensors are channel-first ``[T, C, H, W]`` (see
+:class:`~otavsr.datasets.transforms.loading.LoadAudioVideo`), i.e. spatial
+dimensions are ``2:4`` and channels are dimension ``1``.
+"""
 import numpy as np
 import torch
 
@@ -26,7 +31,11 @@ class MouthCrop:
 
     def transform(self, results: dict) -> dict:
         video = results['video']
-        height, width = video.shape[1:3]
+        if video.dim() != 4:
+            raise ValueError(
+                'MouthCrop expects a channel-first [T, C, H, W] video tensor, '
+                f'got shape {tuple(video.shape)}')
+        height, width = video.shape[2:4]
         if (height, width) == (self.size, self.size):
             return results
         if self.random:
@@ -35,7 +44,7 @@ class MouthCrop:
         else:
             top = (height - self.size) // 2
             left = (width - self.size) // 2
-        results['video'] = video[:, top:top + self.size,
+        results['video'] = video[:, :, top:top + self.size,
                                  left:left + self.size]
         return results
 
@@ -52,7 +61,7 @@ class RandomHorizontalFlip:
 
     def transform(self, results: dict) -> dict:
         if np.random.rand() < self.prob:
-            results['video'] = torch.flip(results['video'], dims=[2])
+            results['video'] = torch.flip(results['video'], dims=[3])
         return results
 
     def __call__(self, results: dict) -> dict:
@@ -61,12 +70,19 @@ class RandomHorizontalFlip:
 
 @TRANSFORMS.register_module()
 class WhisperLogMel:
-    """Log-mel spectrogram identical to ``WhisperFeatureExtractor``.
+    """Log-mel spectrogram in the shape Whisper's encoder expects.
 
-    Whisper-medium expects 80 mel bins, ``n_fft=400``, ``hop_length=160`` and a
+    Whisper-medium wants 80 mel bins, ``n_fft=400``, ``hop_length=160`` and a
     log10 magnitude with an 8-decade clamp. Extracting the mel here (and not in
     the model) keeps :class:`~otavsr.models.backbones.WhisperEncoder` free of
     audio IO and makes the pipeline cache-friendly.
+
+    NOTE the mel filters here come from ``torchaudio`` (HTK-style, ``norm=None``)
+    while the official Whisper checkpoints were trained with librosa's
+    slaney-normalised filters. The two differ by a smooth frequency-dependent
+    gain of a few dB. If you need bit-exact Whisper features, replace the
+    transform with ``transformers.WhisperFeatureExtractor`` -- the paper/repos
+    do not specify which one they used.
     """
 
     def __init__(self,
@@ -78,20 +94,27 @@ class WhisperLogMel:
         self.sample_rate = sample_rate
         self.n_fft = n_fft
         self.hop_length = hop_length
+        self._mel = None
+
+    def _get_mel(self):
+        if self._mel is None:
+            import torchaudio
+            self._mel = torchaudio.transforms.MelSpectrogram(
+                sample_rate=self.sample_rate,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                n_mels=self.n_mels)
+        return self._mel
 
     def transform(self, results: dict) -> dict:
-        try:
-            import torchaudio
-        except ImportError as error:  # pragma: no cover - env dependent
-            raise ImportError('WhisperLogMel needs `torchaudio`.') from error
-        mel = torchaudio.transforms.MelSpectrogram(
-            sample_rate=self.sample_rate,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-            n_mels=self.n_mels)(results['audio'].unsqueeze(0))
+        audio = results['audio']
+        if audio.dim() > 1:
+            audio = audio.squeeze(0)
+        mel = self._get_mel()(audio.unsqueeze(0))
         log_spec = torch.clamp(mel, min=1e-10).log10()
         log_spec = torch.maximum(log_spec, log_spec.max() - 8.0)
-        results['audio'] = (log_spec + 4.0) / 4.0
+        # [1, n_mels, T] -> [n_mels, T] : what WhisperEncoder expects
+        results['audio'] = ((log_spec + 4.0) / 4.0).squeeze(0)
         return results
 
     def __call__(self, results: dict) -> dict:

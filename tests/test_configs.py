@@ -6,14 +6,29 @@ import os.path as osp
 import pytest
 from mmengine.config import Config
 
-CONFIGS = sorted(glob.glob(
-    osp.join(osp.dirname(osp.dirname(__file__)), 'configs', '**', '*.py'),
-    recursive=True))
+
+def _project_root() -> str:
+    """Walk up until the directory that contains ``configs/`` is found.
+
+    ``__file__`` may be relative (pytest runs from the repo root) or absolute,
+    and this file sits at a different depth than the other test modules, so
+    ``dirname(dirname(__file__))`` is not reliable.
+    """
+    root = osp.dirname(osp.abspath(__file__))
+    while (not osp.isdir(osp.join(root, 'configs'))
+           and osp.dirname(root) != root):
+        root = osp.dirname(root)
+    return root
+
+
+ROOT = _project_root()
+CONFIGS = sorted(
+    glob.glob(osp.join(ROOT, 'configs', '**', '*.py'), recursive=True))
 EXPERIMENTS = [path for path in CONFIGS if '_base_' not in path]
 
 
 def _rel(path):
-    return osp.relpath(path, osp.dirname(osp.dirname(__file__)))
+    return osp.relpath(path, ROOT)
 
 
 def test_configs_are_found():
@@ -45,6 +60,18 @@ def test_ot_branch_is_configured(path):
     if ot_loss.s_tilde is not None:
         assert -1 <= ot_loss.s_tilde <= 1
     assert ot_loss.reduction in ('sum', 'mean')
+
+
+@pytest.mark.parametrize('path', EXPERIMENTS, ids=_rel)
+def test_runtime_is_sane(path):
+    """Guards the two config bugs that silently ruin a 30k-step run:
+    saving a checkpoint every iteration, and maximising WER as 'best'."""
+    cfg = Config.fromfile(path)
+    checkpoint = cfg.default_hooks.checkpoint
+    assert checkpoint.interval >= 1000
+    assert checkpoint.save_best == 'wer'
+    assert checkpoint.rule == 'less'
+    assert checkpoint.max_keep_ckpts <= 5
 
 
 def test_fusion_matrix_covers_the_paper_tables():
